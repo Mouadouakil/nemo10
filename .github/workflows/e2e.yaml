@@ -1,0 +1,80 @@
+
+name: e2e
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  kubernetes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v2.0
+      - name: Setup Kubernetes
+        uses: helm/kind-action@v1.4.0
+      - name: Setup Flux
+        uses: fluxcd/flux2/action@main
+        with:
+          version: 0.27.4
+      - name: Install Flux in Kubernetes 
+        run: flux install --log-level debug
+      - name: Create Secret Git Plateform
+        run: |
+          kubectl apply -f - <<EOF > cat 
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: mouad-cluster-flux2-sync
+            namespace: flux-system
+          type: Opaque
+          data:
+            username: TW91YWRvdWFraWw=
+            password: Z2hwXzJUU0V3T3FBNHU3RWVrRjh2eFRlUEpDMUdtMDg1azBkV25Ddw==
+      - name: Create GitRepository
+        run: |
+          kubectl apply -f - <<EOF > cat
+          apiVersion: source.toolkit.fluxcd.io/v1beta1
+          kind: GitRepository
+          metadata:
+            name: mouad-cluster-flux2-sync
+            namespace: flux-system
+          spec:
+            interval: 1m
+            ref:
+              branch: main
+            secretRef:
+              name: mouad-cluster-flux2-sync
+            url: https://github.com/Mouadouakil/nemo10.git
+          EOF
+          flux reconcile source git mouad-cluster-flux2-sync
+          kubectl get GitRepository --all-namespaces 
+          flux create kustomization mouad-cluster-flux2-sync \
+          --interval=1m \
+          --source=mouad-cluster-flux2-sync \
+          --path=./clusters/mouad-cluster
+      - name: Wait for deployment
+        run: |
+          sleep 1m
+      - name: List reconciliations
+        run: |
+          flux get all --all-namespaces
+      - name: List Deployments
+        run: |
+          kubectl get deployments --all-namespaces
+      - name: List Kustomizations
+        run: |
+          sleep 1m
+          flux get kustomization
+      - name: Debug failure
+        if: failure()
+        run: |
+          kubectl -n flux-system get all
+          kubectl -n flux-system logs deploy/source-controller
+          kubectl -n flux-system logs deploy/kustomize-controller
+          kubectl -n flux-system logs deploy/helm-controller
+          flux get all --all-namespaces
+
+		  
